@@ -33,7 +33,8 @@ public:
         conn = mysql_init(0);
         conn = mysql_real_connect(conn, host.c_str(), user.c_str(), password.c_str(), database.c_str(), port, NULL, 0);
         if (conn) {
-            cout << "Database connected successfully!\n";
+            //添加user欢迎信息
+            cout << "Hello " << user << "!\n";
         } else {
             cerr << "Failed to connect to database: " << mysql_error(conn) << endl;
             exit(1);

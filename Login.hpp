@@ -44,11 +44,11 @@ public:
             continue;
         }
         else
-        {
+            {
             //system("cls");
             break;
+            }
         }
-    }
     //验证身份后就不再使用root账号登录，改为使用worker_id登录
     db.ConnectDB(worker_id, password);
 
