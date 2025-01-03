@@ -1,7 +1,10 @@
 #pragma once
 
 #include <map>
+#include <limits>
+#include <vector>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <mysql.h>
 #include <iomanip>
@@ -10,14 +13,74 @@ using namespace std;
 
 class Manager{
 private:
+    static vector<string> split(const string& str, const char& delimiter) {
+        vector<string> result;
+        stringstream ss(str);
+        string item;
+        while (getline(ss, item, delimiter)) {
+            result.push_back(item);
+        }
+        return result;
+    }
+    static vector<string> getColnames(MYSQL *conn, const string& table_name) {
+        vector<string> colnames;
+        string query = "SHOW COLUMNS FROM " + table_name + ";";
+        if (mysql_query(conn, query.c_str()) == 0) {
+            MYSQL_RES *result = mysql_store_result(conn);
+            if (result == NULL) {
+                cerr << "No information found.\n";
+                return colnames;
+            }
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(result))) {
+                colnames.push_back(row[0]);
+            }
+            mysql_free_result(result);
+        } else {
+            cerr << "Error selecting: " << mysql_error(conn) << endl;
+        }
+        return colnames;
+    }
+    static map<string, string> proceeInput(MYSQL *conn, const string& table_name){
+        map<string, string> fv;
+        string field, value;
+        //声明一个字符串数组保存当前表的各字段名
+        vector<string> fields,values;
+        fields = getColnames(conn, table_name);
+                    
+        cout << "The table has the following fields (separated by space): ";
+        // 输出当前表的各字段名
+        for (int i = 0; i < fields.size(); i++) {
+            cout << fields[i] << " ";
+        }
+        cout << endl;
+        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+        // 用户选择的字段名用','分隔, 存在fields数组中，并作为fv的第一个元素
+        cout << "Please enter the fields (separated by comma, * for all fields): \n";
+        getline(cin, field);
+        fields = split(field, ',');
+        // 如果用户输入*，则将fields设置为所有字段名
+        if (field == "*") {
+            fields = getColnames(conn, table_name);
+        }
+        // 用户输入的各值用','分隔, 存在values数组中，并作为fv的第二个元素
+        cout << "Please enter the values for the fields (separated by comma,* to skip): \n";
+        getline(cin, value);
+        values = split(value, ',');
+        //将fields和values组成fv
+        for(int i = 0; i < fields.size(); i++){
+            fv[fields[i]] = values[i];
+        }
+        return fv;
+    }
 public:
     Manager(){};
     ~Manager(){};
-    static bool selectWorker(MYSQL *conn, const map<string, string>& filters) {
-        string query = "SELECT * FROM employee";
+    static bool selectTable(MYSQL *conn, const map<string, string>& filters, const string& table_name) {
+        string query = "SELECT * FROM " + table_name;
     
-        // 如果有筛选条件，则构建 WHERE 子句
-        if (!filters.empty()) {
+        // 检查filters键值是否有*，如果有，则不添加WHERE子句
+        if ( filters.find("*") == filters.end()) {
             query += " WHERE";
             bool first = true;
         
@@ -34,20 +97,23 @@ public:
         if (mysql_query(conn, query.c_str()) == 0) {
             MYSQL_RES *result = mysql_store_result(conn);
             if (result == NULL) {
-                cerr << "No workers found.\n";
+                cerr << "No information found.\n";
                 return false;
             }
             MYSQL_ROW row;
 
             // 输出表头
-            cout << setw(10) << "Worker ID" << setw(15) << "Name" << setw(10) << "Gender" 
-                << setw(15) << "Phone" << setw(15) << "Department" << setw(15) << "Password" << endl;
-
-            while ((row = mysql_fetch_row(result))) {
-                cout << setw(10) << row[0] << setw(15) << row[1] << setw(10) << row[2] 
-                    << setw(15) << row[3] << setw(15) << row[4] << setw(15) << row[5] << endl;
+            vector<string> columns = getColnames(conn, table_name);
+            for(const auto& column : columns) {
+                cout << setw(15) << column;
             }
-
+            cout << endl;
+            while ((row = mysql_fetch_row(result))) {
+                for (int i = 0; i < mysql_num_fields(result); i++) {
+                    cout << setw(15) << row[i];
+                }
+                cout << endl;
+            }
             mysql_free_result(result);
             return true;
         } else {
@@ -55,19 +121,45 @@ public:
             return false;
         }
     }
-    static void insertWorker(MYSQL *conn, const string &worker_id, const string &name, const string &gender, const string &phone, const string &department, const string &password) {
-        string query = "INSERT INTO employee (worker_id, name, gender, phone, department, password) VALUES ('" + worker_id + "', '" + name + "', '" + gender + "', '" + phone + "', '" + department + "', '" + password + "');";
+    static void insertTable(MYSQL *conn, const map<string, string>& values, const string& table_name) {
+        string query = "INSERT INTO " + table_name + " (";
+        bool first = true;
+        for (const auto& value : values) {
+            if (!first) {
+                query += ", ";
+            }
+            query += value.first;
+            first = false;
+        }
+        query += ") VALUES (";
+        first = true;
+        for (const auto& value : values) {
+            if (!first) {
+                query += ", ";
+            }
+            query += "'" + value.second + "'";
+            first = false;
+        }
+        query += ")";
         if (mysql_query(conn, query.c_str()) == 0) {
+            cout << "Data inserted successfully!\n";
+        } else {
+            cerr << "Error inserting data: " << mysql_error(conn) << endl;
+        }
+        //如果是插入员工，还需要创建用户
+        if(table_name == "employee"){
+            string createUserQuery = "CREATE USER '" + values.at("worker_id") + "'@'localhost' IDENTIFIED BY '" + values.at("password") + "';";
+        if (mysql_query(conn, createUserQuery.c_str()) == 0) {
             cout << "Worker added successfully!\n";
         } else {
             cerr << "Error adding worker: " << mysql_error(conn) << endl;
         }
 
         // 赋予employee_role角色权限
-        string grantRoleQuery = "GRANT employee_role TO '" + worker_id + "'@'localhost';";
+        string grantRoleQuery = "GRANT employee_role TO '" + values.at("worker_id") + "'@'localhost';";
         if (mysql_query(conn, grantRoleQuery.c_str()) == 0) {
             //激活角色
-            string activate = "SET DEFAULT ROLE employee_role TO '" + worker_id + "'@'localhost';";
+            string activate = "SET DEFAULT ROLE employee_role TO '" + values.at("worker_id") + "'@'localhost';";
             if (mysql_query(conn, activate.c_str()) == 0) 
                 cout << "Role activated successfully!\n";
             cout << "Role granted successfully!\n";
@@ -76,20 +168,39 @@ public:
             return;
         }
     }
-    static void deleteWorker(MYSQL *conn, const string &worker_id) {
-        string query = "DELETE FROM employee WHERE worker_id = '" + worker_id + "';";
+    }
+    static void deleteTable(MYSQL *conn, const map<string, string>& filters, const string& table_name, const vector<string>& columns) {
+        if(selectTable(conn, filters, table_name)){
+            cout << "Please confirm the information to be deleted:\n";
+        }
+        string query = "DELETE FROM " + table_name;
+        // 如果有筛选条件，则构建 WHERE 子句
+        if (!filters.empty()) {
+            query += " WHERE";
+            bool first = true;
+        
+            for (const auto& filter : filters) {
+                if (!first) {
+                    query += " AND";  // 连接条件
+                }
+                query += " " + filter.first + " LIKE '%" + filter.second + "%'";  // 构建筛选条件
+                first = false;
+            }
+        }
         if (mysql_query(conn, query.c_str()) == 0) {
             cout << "Worker deleted successfully!\n";
         } else {
             cerr << "Error deleting worker: " << mysql_error(conn) << endl;
         }
-        //删除该用户
-        string dropUserQuery = "DROP USER '" + worker_id + "'@'localhost';";
+        if(table_name == "employee"){
+        //如果是删除员工，还需要删除该用户
+        string dropUserQuery = "DROP USER '" + filters.at("worker_id") + "'@'localhost';";
         if (mysql_query(conn, dropUserQuery.c_str()) == 0) {
             cout << "User deleted successfully!\n";
         } else {
             cerr << "Error deleting user: " << mysql_error(conn) << endl;
         }
+    }
     }
     static void updateWorker(MYSQL *conn, const string &worker_id) {
         int choice = 0;
@@ -108,11 +219,12 @@ public:
                 cout << "out of permission" << endl;
                 continue;
             }
-            if(!selectWorker(conn, {{"worker_id", new_worker_id}})){
+            /*if(!selectTable(conn, {{"worker_id", new_worker_id}})){
                 //新ID已存在
                 cout << "The new Worker ID already exists.\n";
                 continue;
             }
+            */
             string query = "UPDATE employee SET worker_id = '" + new_worker_id + "' WHERE worker_id = '" + worker_id + "';";
             if (mysql_query(conn, query.c_str()) == 0) {
                 cout << "Worker ID updated successfully!\n";
@@ -221,157 +333,188 @@ public:
         }
     }
 }
-
-
-
-    static bool selectSalary(MYSQL *conn, const map<string, string>& filters) {
-        string query = "SELECT * FROM salary";
-    
-        // 如果有筛选条件，则构建 WHERE 子句
-        if (!filters.empty()) {
-            query += " WHERE";
-            bool first = true;
-        
-            for (const auto& filter : filters) {
-                if (!first) {
-                    query += " AND";  // 连接条件
-                }
-                query += " " + filter.first + " LIKE '%" + filter.second + "%'";  // 构建筛选条件
-                first = false;
-            }
-        }
-    
-        // 执行查询
-        if (mysql_query(conn, query.c_str()) == 0) {
-            MYSQL_RES *result = mysql_store_result(conn);
-            if (result == NULL) {
-                cerr << "No workers found.\n";
-                return false;
-            }
-            MYSQL_ROW row;
-
-            // 输出表头
-            cout << setw(10) << "Worker ID" << setw(15) << "Name" << setw(10) << "Gender" 
-                << setw(15) << "Phone" << setw(15) << "Department" << setw(15) << "Password" << endl;
-
-            while ((row = mysql_fetch_row(result))) {
-                cout << setw(10) << row[0] << setw(15) << row[1] << setw(10) << row[2] 
-                    << setw(15) << row[3] << setw(15) << row[4] << setw(15) << row[5] << endl;
-            }
-
-            mysql_free_result(result);
-            return true;
-        } else {
-            cerr << "Error selecting workers: " << mysql_error(conn) << endl;
-            return false;
-        }
-    }
-   
+ 
     static void executeManagerOption(MYSQL *conn) {
-        int choice = 0;
-        do {
-            if(choice == 0){
-                cout << "\nManager Options:\n"
-                     << "1. Add Worker  2. Delete Worker 3. Update Worker 4. Select Worker\n"
-                     << "5. Add salary  6. Delete salary 7. Update salary 8. Select salary\n";
-                cin.ignore();
-                cin >> choice;
-                cin.ignore();
+        int choice = 0,table = 0;
+        string table_name = "";
+        while(true){
+            //先选择要操作的表
+            if(table == 0){
+                cout << "Select Table:\n1. Employee\n2. Salary\n3. Attendance\n4. Register\n5.Department\n6.Exit.\nEnter your choice: ";
+                cin >> table;
+                // 检查输入是否为整数
+                if(cin.fail()){
+                cin.clear(); // 清除错误状态
+                cin.ignore(numeric_limits<streamsize>::max(), '\n'); // 忽略错误输入
+                cout << "Invalid input. Please enter a number between 1 and 6.\n";
+                table = 0; // 重置table以重新提示输入
+                continue; // 重新开始循环
+                }
             }
-
-            switch (choice) {
-            case 1: {
-                //string类型不能存储中文字符，这里注意，暂时先不改进了
-                string worker_id, name, gender, phone, department, password;
-                cout << "Enter Worker ID: ";
-                cin >> worker_id;
-                if(worker_id[0] == '0'){
-                    //只能创建普通员工
-                    cout << "out of permission" << endl;
+            switch (table) {
+            case 1:
+                {
+                    table_name = "employee";
                     break;
                 }
-                cout << "Enter Name: ";
-                cin >> name;
-                cout << "Enter Gender: ";
-                cin >> gender;
-                cout << "Enter Phone: ";
-                cin >> phone;
-                cout << "Enter Department: ";
-                cin >> department;
-                cout << "Enter Password: ";
-                cin >> password;
-                insertWorker(conn, worker_id, name, gender, phone, department, password);
-                choice = 0;
-                continue;
-            }
-            case 2: {
-                string worker_id;
-                cout << "Enter Worker ID to delete: ";
-                cin >> worker_id;
-                if(worker_id[0] == '0'){
-                    //只能删除普通员工
-                    cout << "out of permission" << endl;
+            case 2:
+                {
+                    table_name = "salary";
                     break;
                 }
-                deleteWorker(conn,worker_id);
-                choice = 0;
-                continue;
-            }
-            case 3:{
-                cout << "Enter Worker ID to update: ";
-                string worker_id;
-                cin >> worker_id;
-                if(worker_id[0] == '0'){
-                    //只能更新普通员工
-                    cout << "out of permission" << endl;
+            case 3:
+                {
+                    table_name = "attendance";
                     break;
                 }
-                //检查worker_id是否存在
-                if(!selectWorker(conn,{{"worker_id",worker_id}})){
-                    cout << "Worker not found.\n";
-                    break;
-                }
-                updateWorker(conn,worker_id);
-                choice = 0;
-                continue;
-            }
             case 4:
                 {
-                    map<string, string> filters;
+                    table_name = "register";
+                    break;
+                }
+            case 5:
+                {
+                    table_name = "department";
+                    break;
+                }
+            case 6:
+                {
+                    cout << "Exiting Manager.\n";
+                    return;
+                }
+            default:
+                cout << "Invalid choice. Try again.\n";
+                table = 0;
+                continue;
+            }
+            do {
+                if(choice == 0){
+                    cout << "\nManager Options:\n"
+                        << "1. Add Information  2. Delete Information 3. Update Information 4. Query Information\n"
+                        << "5. Back.\nEnter your choice: ";
+                    cin >> choice;
+                    if(cin.fail()){
+                        cin.clear(); // 清除错误状态
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // 忽略错误输入
+                        cout << "Invalid input. Please enter a number between 1 and 6.\n";
+                        table = 0; // 重置table以重新提示输入
+                        continue; // 重新开始循环
+                    }
+                }
+                switch (choice) {
+                case 1: {
+                    cout << "You are adding a new entry to the " << table_name << " table.\n";
+                    map<string, string> fv = proceeInput(conn, table_name);  // 调用输入函数
+                    /*map<string, string> fv;                        
                     string field, value;
-        
-                    cout << "Enter fields to filter (Name, Gender, Phone, Department) separated by commas, or * for all: ";
-                    getline(cin, field);
-        
-                    if (field != "*") {
-                        stringstream ss(field);
-                        string individualField;
-                        //禁止password字段作为筛选条件
-                        if(field.find("password") != string::npos){
-                            cout << "password is not allowed as a filter field." << endl;
-                            break;
+                    //声明一个字符串数组保存当前表的各字段名
+                    vector<string> fields;
+                    //用table_name去查询当前表的各字段名，然后保存到fields中
+                    string query = "SHOW COLUMNS FROM " + table_name + ";";
+                    if (mysql_query(conn, query.c_str()) == 0) {
+                        MYSQL_RES *result = mysql_store_result(conn);
+                        if (result == NULL) {
+                            cerr << "No information found.\n";
+                            return ;
                         }
-            
-                        // 解析用户输入的多个字段
-                        while (getline(ss, individualField, ',')) {
-                            cout << "Enter value for " << individualField << ": ";
-                            getline(cin, value);
-                            filters[individualField] = value;  // 将字段和对应的值加入筛选条件
+                        MYSQL_ROW row;
+                        while ((row = mysql_fetch_row(result))) {
+                            fields.push_back(row[0]);
+                        }
+                        mysql_free_result(result);
+                    } else {
+                        cerr << "Error selecting: " << mysql_error(conn) << endl;
+                        return;
+                    }
+                    
+                    cout << "Fill all the required fields (";
+                    // 输出当前表的各字段名
+                    for (int i = 0; i < fields.size(); i++) {
+                        cout << fields[i] << " ";
+                    }
+                    cout << ") with ',' to separate: \n";
+                    cin.ignore();
+                    getline(cin, value);
+        
+                    // 解析用户输入的多个值
+                    stringstream ss(value);
+                    string individualValue;
+                    int fieldIndex = 0;
+
+                    // 将键值对存入 fv 中
+                    while (getline(ss, individualValue, ',')) {
+                        if (fieldIndex < fields.size()) {
+                            // 对应字段和值之间存储到 fv 中
+                            fv[fields[fieldIndex]] = individualValue;
+                            fieldIndex++;
                         }
                     }
-        
-                    selectWorker(conn, filters);  // 调用查询函数
+
+                    // 确保每个字段都有对应的值
+                    if (fieldIndex != fields.size()) {
+                        cerr << "Error: Not all fields have corresponding values.\n";
+                        return;
+                    }
+                    */
+                    insertTable(conn, fv, table_name);  // 调用插入函数
+                    table = 0;
                     choice = 0;
                     continue;
                 }
-            case 5:{
-                cout << "Enter Worker ID.\n";
-                return;
-            }
-            default:
-                cout << "Invalid choice. Try again.\n";
-                choice = 0;
-            }
-        } while (choice != 4);
+                case 2: {
+                    cout << "You are deleting an entry from the " << table_name << " table.\n";
+                    string worker_id;
+                    cout << "Enter Worker ID to delete: ";
+                    cin >> worker_id;
+                    if(worker_id[0] == '0'){
+                        //只能删除普通员工
+                        cout << "out of permission" << endl;
+                        break;
+                    }
+                    //deleteTable(conn,worker_id);
+                    choice = 0;
+                    continue;
+                }
+                case 3:{
+                    cout << "You are updating the " << table_name << "table.\n";
+
+                    cout << "Enter Worker ID to update: ";
+                    string worker_id;
+                    cin >> worker_id;
+                    if(worker_id[0] == '0'){
+                        //只能更新普通员工
+                        cout << "out of permission" << endl;
+                        break;
+                    }
+                    //检查worker_id是否存在
+                    /*if(!selectTable(conn,{{"worker_id",worker_id}})){
+                        cout << "Worker not found.\n";
+                        break;
+                    }
+                    */
+                    updateWorker(conn,worker_id);
+                    choice = 0;
+                    continue;
+                }
+                case 4:
+                    {
+                        cout << "You are querying the "<< table_name << " table.\n";
+                        map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                        selectTable(conn, filters, table_name);  // 调用查询函数
+                        choice = 0;
+                        continue;
+                    }
+                case 5:{
+                    cout << "Back.\n";
+                    break;
+                }
+                default:
+                    cout << "Invalid choice. Try again.\n";
+                    choice = 0;
+                }
+            } while (choice != 5);
+            table = 0;
+            choice = 0;
+        }
     }
 };
