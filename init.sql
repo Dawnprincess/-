@@ -56,6 +56,7 @@ CREATE ROLE IF NOT EXISTS 'employee_role';
 GRANT SELECT on em.employee_view TO 'employee_role';
 CREATE ROLE IF NOT EXISTS 'manager_role';
 GRANT SELECT,INSERT,UPDATE,DELETE ON em.* TO 'manager_role';
+GRANT SELECT,UPDATE ON mysql.user TO 'manager_role';
 GRANT CREATE USER,ROLE_ADMIN ON *.* TO 'manager_role';
 CREATE USER '00000'@'localhost' IDENTIFIED BY '123456';
 GRANT 'manager_role'@'%' TO '00000'@'localhost';
