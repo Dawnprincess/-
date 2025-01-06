@@ -25,13 +25,13 @@ CREATE TABLE salary (
     salary_id INT(5) NOT NULL,
     worker_id VARCHAR(5) NOT NULL,
     base_salary DECIMAL(10,2) NOT NULL,
-    bonus DECIMAL(10,2) NOT NULL,
+    bonus DECIMAL(10,2),
     PRIMARY KEY (salary_id),
     FOREIGN KEY (worker_id) REFERENCES employee(worker_id) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE attendance (
     attendance_id INT(5) NOT NULL,
-    attendance_type VARCHAR(20) NOT NULL,
+    attendance_type ENUM('1','2') NOT NULL,
     PRIMARY KEY (attendance_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE register (

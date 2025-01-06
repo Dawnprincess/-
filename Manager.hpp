@@ -41,38 +41,64 @@ private:
         }
         return colnames;
     }
-    static map<string, string> proceeInput(MYSQL *conn, const string& table_name){
+    static void clearInputBuffer() {
+        if (cin.peek() == '\n') {
+            cin.ignore();
+        }
+    }
+    static map<string, string> proceeInput(MYSQL *conn, const string& table_name) {
         map<string, string> fv;
-        string field, value;
-        //声明一个字符串数组保存当前表的各字段名
-        vector<string> fields,values;
-        fields = getColnames(conn, table_name);
-                    
+        string fields_input, values_input;
+        vector<string> fields = getColnames(conn, table_name);
+
         cout << "The table has the following fields (separated by space): ";
-        // 输出当前表的各字段名
-        for (int i = 0; i < fields.size(); i++) {
-            cout << fields[i] << " ";
+        for (const string& field : fields) {
+            cout << field << " ";
         }
         cout << endl;
-        cin.ignore(numeric_limits<streamsize>::max(), '\n');
-        // 用户选择的字段名用','分隔, 存在fields数组中，并作为fv的第一个元素
+
+        // 用户输入字段名
         cout << "Please enter the fields (separated by comma, * for all fields): \n";
-        getline(cin, field);
-        fields = split(field, ',');
-        // 如果用户输入*，则将fields设置为所有字段名
-        if (field == "*") {
-            fields = getColnames(conn, table_name);
+        clearInputBuffer(); // 只在必要时清理缓冲区
+        getline(cin, fields_input);
+
+        // 用户输入值
+        cout << "Please enter the corresponding values (separated by comma): \n";
+        clearInputBuffer(); // 只在必要时清理缓冲区
+        getline(cin, values_input);
+
+        // 处理输入并返回 fv（代码保持不变）
+        vector<string> selected_fields;
+        if (fields_input == "*") {
+            fv["*"] = '*';
+        } else {
+            stringstream ss(fields_input);
+            string field;
+            while (getline(ss, field, ',')) {
+                selected_fields.push_back(field);
+            }
         }
-        // 用户输入的各值用','分隔, 存在values数组中，并作为fv的第二个元素
-        cout << "Please enter the values for the fields (separated by comma,* to skip): \n";
-        getline(cin, value);
-        values = split(value, ',');
-        //将fields和values组成fv
-        for(int i = 0; i < fields.size(); i++){
-            fv[fields[i]] = values[i];
+
+        //初始化selected_values为fields_input的大小，防止fields_input为*时，selected_values为空
+        vector<string> selected_values = selected_fields;
+        stringstream ss(values_input);
+        string value;
+        while (getline(ss, value, ',')) {
+            selected_values.push_back(value);
         }
+        //field_input没有*，selected_fields和selected_values的大小应该相等
+        if (selected_fields.size() != selected_values.size() && fields_input!= "*") {
+            cerr << "Error: The number of fields does not match the number of values!" << endl;
+            return fv;
+        }
+
+        for (size_t i = 0; i < selected_fields.size(); ++i) {
+            fv[selected_fields[i]] = selected_values[i];
+        }
+
         return fv;
     }
+
 public:
     Manager(){};
     ~Manager(){};
@@ -117,7 +143,7 @@ public:
             mysql_free_result(result);
             return true;
         } else {
-            cerr << "Error selecting workers: " << mysql_error(conn) << endl;
+            cerr << "Error selecting: " << mysql_error(conn) << endl;
             return false;
         }
     }
@@ -169,7 +195,7 @@ public:
         }
     }
     }
-    static void deleteTable(MYSQL *conn, const map<string, string>& filters, const string& table_name, const vector<string>& columns) {
+    static void deleteTable(MYSQL *conn, const map<string, string>& filters, const string& table_name) {
         if(selectTable(conn, filters, table_name)){
             cout << "Please confirm the information to be deleted:\n";
         }
@@ -187,153 +213,115 @@ public:
                 first = false;
             }
         }
-        if (mysql_query(conn, query.c_str()) == 0) {
-            cout << "Worker deleted successfully!\n";
-        } else {
-            cerr << "Error deleting worker: " << mysql_error(conn) << endl;
-        }
+        //查询符合筛选条件的worker_id
         if(table_name == "employee"){
-        //如果是删除员工，还需要删除该用户
-        string dropUserQuery = "DROP USER '" + filters.at("worker_id") + "'@'localhost';";
-        if (mysql_query(conn, dropUserQuery.c_str()) == 0) {
-            cout << "User deleted successfully!\n";
-        } else {
-            cerr << "Error deleting user: " << mysql_error(conn) << endl;
-        }
-    }
-    }
-    static void updateWorker(MYSQL *conn, const string &worker_id) {
-        int choice = 0;
-        while(true){
-        if(choice == 0){
-            cout << "Update Worker Options:\n1. Change Worker ID\n2. Change Name\n3. Change Gender\n4. Change Phone\n5. Change Department\n6. Change Password\n7. Exit\nEnter your choice: ";
-            cin >> choice;
-        }
-        switch (choice) {
-        case 1: {
-            string new_worker_id;
-            cout << "Enter new Worker ID: ";
-            cin >> new_worker_id;
-            if(new_worker_id[0] == '0'){
-                //只能更新普通员工
-                cout << "out of permission" << endl;
-                continue;
+            vector<string> worker_ids;
+            string query2 = "SELECT worker_id FROM employee WHERE";
+            bool first = true;
+            for (const auto& filter : filters) {
+                if (!first) {
+                    query2 += " AND";  // 连接条件
+                }
+                query2 += " " + filter.first + " LIKE '%" + filter.second + "%'";  // 构建筛选条件
+                first = false;
             }
-            /*if(!selectTable(conn, {{"worker_id", new_worker_id}})){
-                //新ID已存在
-                cout << "The new Worker ID already exists.\n";
-                continue;
-            }
-            */
-            string query = "UPDATE employee SET worker_id = '" + new_worker_id + "' WHERE worker_id = '" + worker_id + "';";
-            if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Worker ID updated successfully!\n";
-                //更新用户
-                string updateUserQuery = "UPDATE mysql.user SET User = '" + new_worker_id + "' WHERE User = '" + worker_id + "';";
-                if (mysql_query(conn, updateUserQuery.c_str()) == 0) {
-                    cout << "User updated successfully!\n";
-                    return;
-                } else {
-                    cerr << "Error updating user: " << mysql_error(conn) << endl;
-                    //用户更新失败，复原worker_id
-                    string revertQuery = "UPDATE employee SET worker_id = '" + worker_id + "' WHERE worker_id = '" + new_worker_id + "';";
-                    if (mysql_query(conn, revertQuery.c_str()) == 0) {
-                        cout << "Worker ID reverted successfully!\n";
-                    } else {
-                        cerr << "Error reverting worker ID: " << mysql_error(conn) << endl;
-                    }
+            if (mysql_query(conn, query2.c_str()) == 0) {
+                MYSQL_RES *result = mysql_store_result(conn);
+                if (result == NULL) {
+                    cerr << "No information found.\n";
                     return;
                 }
-                //更新后的用户ID不再适用，再进行其他更新操作无效，退出该函数
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(result))) {
+                    worker_ids.push_back(row[0]);
+                }
+                mysql_free_result(result);
             } else {
-                cerr << "Error updating worker ID: " << mysql_error(conn) << endl;
+                cerr << "Error selecting workers: " << mysql_error(conn) << endl;
+                return;
             }
-            break;
+            //删除用户
+            for(const auto& worker_id : worker_ids){
+                string dropUserQuery = "DROP USER '" + worker_id + "'@'localhost';";
+                if (mysql_query(conn, dropUserQuery.c_str()) == 0) {
+                    cout << "User deleted successfully!\n";
+                } else {
+                    cerr << "Error deleting user: " << mysql_error(conn) << endl;
+                }
+            }
         }
-        case 2: {
-            string new_name;
-            cout << "Enter new Name: ";
-            cin >> new_name;
-            cin.ignore();
-            string query = "UPDATE employee SET name = '" + new_name + "' WHERE worker_id = '" + worker_id + "';";
+    }
+    static void updateTable(MYSQL *conn, const map<string, string>& filters,const map<string, string>& values, const string& table_name) {
+        //filters筛选要修改的行，values是要修改的字段名和值
+        //如果涉及更新employee表中的worker_id，则需要先获取旧的worker_id
+        string old_worker_id;
+        if(table_name == "employee" && values.find("worker_id") != values.end()){
+            string query = "SELECT worker_id FROM employee WHERE";
+            bool first = true;
+            for (const auto& value : values) {
+                if (!first) {
+                    query += " AND";  // 连接条件
+                }
+                query += " " + value.first + " LIKE '%" + value.second + "%'";  // 构建筛选条件
+                first = false;
+            }
             if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Name updated successfully!\n";
-                choice = 0;
-                continue;
+                MYSQL_RES *result = mysql_store_result(conn);
+                if (result == NULL) {
+                    cerr << "No information found.\n";
+                    return;
+                }
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(result))) {
+                    old_worker_id = row[0];
+                }
+                mysql_free_result(result);
             } else {
-                cerr << "Error updating name: " << mysql_error(conn) << endl;
-            }
-            break;
-        }
-        case 3: {
-            string new_gender;
-            cout << "Enter new Gender: ";
-            cin >> new_gender;
-            string query = "UPDATE employee SET gender = '" + new_gender + "' WHERE worker_id = '" + worker_id + "';";
-            if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Gender updated successfully!\n";
-                choice = 0;
-                continue;
+                cerr << "Error selecting workers: " << mysql_error(conn) << endl;
+                return;
+            }   
+            //获取新的worker_id
+            string new_worker_id = values.at("worker_id");
+            string updateUserQuery = "UPDATE mysql.user SET User = '" + values.at("worker_id") + "' WHERE User = '" + old_worker_id + "';";
+            if (mysql_query(conn, updateUserQuery.c_str()) == 0) {
+                cout << "User updated successfully!\n";
             } else {
-                cerr << "Error updating gender: " << mysql_error(conn) << endl;
+                cerr << "Error updating user: " << mysql_error(conn) << endl;
+                return;
             }
-            break;
         }
-        case 4: {
-            string new_phone;
-            cout << "Enter new Phone: ";
-            cin >> new_phone;
-            string query = "UPDATE employee SET phone = '" + new_phone + "' WHERE worker_id = '" + worker_id + "';";
-            if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Phone updated successfully!\n";
-                choice = 0;
-                continue;
-            } else {
-                cerr << "Error updating phone: " << mysql_error(conn) << endl;
+        //获取用户输入的更新字段名和值
+        string query = "UPDATE " + table_name + " SET";
+        // 构建 SET 子句
+        bool first = true;
+        for (const auto& value : values) {
+            if (!first) {
+                query += ", ";
             }
-            break;
+            query += " " + value.first + " = '" + value.second + "'";
+            first = false;
         }
-        case 5: {
-            string new_department;
-            cout << "Enter new Department: ";
-            cin >> new_department;
-            string query = "UPDATE employee SET department = '" + new_department + "' WHERE worker_id = '" + worker_id + "';";
-            if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Department updated successfully!\n";
-                choice = 0;
-                continue;
-            } else {
-                cerr << "Error updating department: " << mysql_error(conn) << endl;
+        // 如果有筛选条件，则构建 WHERE 子句
+        if (!filters.empty()) {
+            query += " WHERE";
+            bool first = true;
+        
+            for (const auto& filter : filters) {
+                if (!first) {
+                    query += " AND";  // 连接条件
+                }
+                query += " " + filter.first + " LIKE '%" + filter.second + "%'";  // 构建筛选条件
+                first = false;
             }
-            break;
-        }
-        case 6: {
-            string new_password;
-            cout << "Enter new Password: ";
-            cin >> new_password;
-            string query = "UPDATE employee SET password = '" + new_password + "' WHERE worker_id = '" + worker_id + "';";
-            if (mysql_query(conn, query.c_str()) == 0) {
-                cout << "Password updated successfully!\n";
-                choice = 0;
-                continue;
-            } else {
-                cerr << "Error updating password: " << mysql_error(conn) << endl;
-            }
-            break;
-        }
-        case 7:
-            {
-            cout << "Exiting Update Worker.\n";
-            return;
-            }
-        default:{
-            cout << "Invalid choice. Try again.\n";
-            continue;
-            }
+        // 执行更新
+        if (mysql_query(conn, query.c_str()) == 0) {
+            cout << "Data updated successfully!\n";
+        } else {
+            cerr << "Error updating data: " << mysql_error(conn) << endl;
         }
     }
 }
- 
+
     static void executeManagerOption(MYSQL *conn) {
         int choice = 0,table = 0;
         string table_name = "";
@@ -404,6 +392,7 @@ public:
                 switch (choice) {
                 case 1: {
                     cout << "You are adding a new entry to the " << table_name << " table.\n";
+                    cout << "Please fill in the required fields with ',' to separate:\n";
                     map<string, string> fv = proceeInput(conn, table_name);  // 调用输入函数
                     /*map<string, string> fv;                        
                     string field, value;
@@ -463,36 +452,22 @@ public:
                 }
                 case 2: {
                     cout << "You are deleting an entry from the " << table_name << " table.\n";
-                    string worker_id;
-                    cout << "Enter Worker ID to delete: ";
-                    cin >> worker_id;
-                    if(worker_id[0] == '0'){
-                        //只能删除普通员工
-                        cout << "out of permission" << endl;
-                        break;
-                    }
-                    //deleteTable(conn,worker_id);
+                    cout << "Please select the fields and the values to be deleted:\n";
+                    map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                    deleteTable(conn,filters, table_name);
                     choice = 0;
                     continue;
                 }
                 case 3:{
                     cout << "You are updating the " << table_name << "table.\n";
-
-                    cout << "Enter Worker ID to update: ";
-                    string worker_id;
-                    cin >> worker_id;
-                    if(worker_id[0] == '0'){
-                        //只能更新普通员工
-                        cout << "out of permission" << endl;
-                        break;
-                    }
-                    //检查worker_id是否存在
-                    /*if(!selectTable(conn,{{"worker_id",worker_id}})){
-                        cout << "Worker not found.\n";
-                        break;
-                    }
-                    */
-                    updateWorker(conn,worker_id);
+                    //选择需要修改的项以及修改内容
+                    cout << "Please fill the fields and the values to select:\n";
+                    map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                    cout << "Please confirm the information to be updated:\n";
+                    selectTable(conn, filters, table_name);
+                    cout << "Please select the fields and enter the new values to update:\n";
+                    map<string, string> updates = proceeInput(conn, table_name);  // 调用输入函数
+                    updateTable(conn,filters ,updates,table_name);
                     choice = 0;
                     continue;
                 }
