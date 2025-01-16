@@ -2,6 +2,7 @@
 123456
 
 
+worker_id,name,gender,phone,department,password
 10002,rose,f,10987654321,hq,123456
 10001,rose,f,10987654321,hq,123456
 Rose

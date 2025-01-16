@@ -13,15 +13,28 @@ using namespace std;
 
 class Manager{
 private:
-    static vector<string> split(const string& str, const char& delimiter) {
-        vector<string> result;
-        stringstream ss(str);
-        string item;
-        while (getline(ss, item, delimiter)) {
-            result.push_back(item);
+    // 用于连接字符串的工具函数
+    static string join(const vector<string>& vec, const string& delimiter) {
+        ostringstream oss;
+        for (size_t i = 0; i < vec.size(); ++i) {
+            if (i != 0) {
+                oss << delimiter;
+            }
+            oss << vec[i];
         }
-        return result;
+        return oss.str();
+}
+
+    static vector<string> split(const string &s, char delimiter) {
+        vector<string> tokens;
+        string token;
+        istringstream tokenStream(s);
+        while (getline(tokenStream, token, delimiter)) {
+            tokens.push_back(token);
+        }
+        return tokens;
     }
+
     static vector<string> getColnames(MYSQL *conn, const string& table_name) {
         vector<string> colnames;
         string query = "SHOW COLUMNS FROM " + table_name + ";";
@@ -46,7 +59,7 @@ private:
             cin.ignore();
         }
     }
-    static map<string, string> proceeInput(MYSQL *conn, const string& table_name) {
+    static map<string, string> processInput(MYSQL *conn, const string& table_name) {
         map<string, string> fv;
         string fields_input, values_input;
         vector<string> fields = getColnames(conn, table_name);
@@ -57,37 +70,18 @@ private:
         }
         cout << endl;
 
-        // 用户输入字段名
         cout << "Please enter the fields (separated by comma, * for all fields): \n";
-        clearInputBuffer(); // 只在必要时清理缓冲区
+        clearInputBuffer();
         getline(cin, fields_input);
 
-        // 用户输入值
         cout << "Please enter the corresponding values (separated by comma): \n";
-        clearInputBuffer(); // 只在必要时清理缓冲区
+        clearInputBuffer();
         getline(cin, values_input);
 
-        // 处理输入并返回 fv（代码保持不变）
-        vector<string> selected_fields;
-        if (fields_input == "*") {
-            fv["*"] = '*';
-        } else {
-            stringstream ss(fields_input);
-            string field;
-            while (getline(ss, field, ',')) {
-                selected_fields.push_back(field);
-            }
-        }
+        vector<string> selected_fields = (fields_input == "*") ? fields : split(fields_input, ',');
+        vector<string> selected_values = split(values_input, ',');
 
-        //初始化selected_values为fields_input的大小，防止fields_input为*时，selected_values为空
-        vector<string> selected_values = selected_fields;
-        stringstream ss(values_input);
-        string value;
-        while (getline(ss, value, ',')) {
-            selected_values.push_back(value);
-        }
-        //field_input没有*，selected_fields和selected_values的大小应该相等
-        if (selected_fields.size() != selected_values.size() && fields_input!= "*") {
+        if (selected_fields.size() != selected_values.size()) {
             cerr << "Error: The number of fields does not match the number of values!" << endl;
             return fv;
         }
@@ -212,6 +206,12 @@ public:
                 query += " " + filter.first + " LIKE '%" + filter.second + "%'";  // 构建筛选条件
                 first = false;
             }
+        }
+        // 执行删除
+        if (mysql_query(conn, query.c_str()) == 0) {
+            cout << "Data deleted successfully!\n";
+        } else {
+            cerr << "Error deleting data: " << mysql_error(conn) << endl;
         }
         //查询符合筛选条件的worker_id
         if(table_name == "employee"){
@@ -393,7 +393,7 @@ public:
                 case 1: {
                     cout << "You are adding a new entry to the " << table_name << " table.\n";
                     cout << "Please fill in the required fields with ',' to separate:\n";
-                    map<string, string> fv = proceeInput(conn, table_name);  // 调用输入函数
+                    map<string, string> fv = processInput(conn, table_name);  // 调用输入函数
                     /*map<string, string> fv;                        
                     string field, value;
                     //声明一个字符串数组保存当前表的各字段名
@@ -453,7 +453,7 @@ public:
                 case 2: {
                     cout << "You are deleting an entry from the " << table_name << " table.\n";
                     cout << "Please select the fields and the values to be deleted:\n";
-                    map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                    map<string, string> filters = processInput(conn, table_name);  // 调用输入函数
                     deleteTable(conn,filters, table_name);
                     choice = 0;
                     continue;
@@ -462,11 +462,11 @@ public:
                     cout << "You are updating the " << table_name << "table.\n";
                     //选择需要修改的项以及修改内容
                     cout << "Please fill the fields and the values to select:\n";
-                    map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                    map<string, string> filters = processInput(conn, table_name);  // 调用输入函数
                     cout << "Please confirm the information to be updated:\n";
                     selectTable(conn, filters, table_name);
                     cout << "Please select the fields and enter the new values to update:\n";
-                    map<string, string> updates = proceeInput(conn, table_name);  // 调用输入函数
+                    map<string, string> updates = processInput(conn, table_name);  // 调用输入函数
                     updateTable(conn,filters ,updates,table_name);
                     choice = 0;
                     continue;
@@ -474,7 +474,7 @@ public:
                 case 4:
                     {
                         cout << "You are querying the "<< table_name << " table.\n";
-                        map<string, string> filters = proceeInput(conn, table_name);  // 调用输入函数
+                        map<string, string> filters = processInput(conn, table_name);  // 调用输入函数
                         selectTable(conn, filters, table_name);  // 调用查询函数
                         choice = 0;
                         continue;
